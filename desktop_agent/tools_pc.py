@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import ctypes
 import os
+from pathlib import Path
 import platform
 import subprocess
+import sys
 import time
 from typing import Any, Dict, Optional
 
@@ -32,9 +34,22 @@ _vol_backend = None  # one of "pycaw" | "media_keys" | None
 
 def _init_pycaw():
     try:
+        try:
+            import pycaw  # noqa: F401
+        except ImportError:
+            venv_site = Path(__file__).resolve().parent.parent / ".venv" / "Lib" / "site-packages"
+            if venv_site.is_dir() and str(venv_site) not in sys.path:
+                sys.path.insert(0, str(venv_site))
+
         from ctypes import cast, POINTER
 
         import comtypes  # noqa: F401
+        from comtypes import CoInitialize
+        try:
+            CoInitialize()
+        except Exception:
+            pass
+
         from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
         devices = AudioUtilities.GetSpeakers()
@@ -47,7 +62,7 @@ def _init_pycaw():
 
 def _get_volume_interface():
     global _vol_backend
-    if _vol_backend is None:
+    if _vol_backend is None or _vol_backend == "media_keys":
         if platform.system() != "Windows":
             _vol_backend = "media_keys"
         else:
@@ -67,11 +82,17 @@ def _current_volume() -> float:
     if backend == "pycaw":
         iface = _VOL_CACHE.get("iface") or _init_pycaw()
         if iface is not None:
-            _VOL_CACHE["iface"] = iface
             try:
+                _VOL_CACHE["iface"] = iface
                 return float(iface.GetMasterVolumeLevelScalar())
             except Exception:
-                pass
+                iface = _init_pycaw()
+                if iface is not None:
+                    _VOL_CACHE["iface"] = iface
+                    try:
+                        return float(iface.GetMasterVolumeLevelScalar())
+                    except Exception:
+                        pass
     return 0.5  # unknown
 
 
@@ -81,12 +102,19 @@ def _set_volume_scalar(value: float) -> None:
     if backend == "pycaw":
         iface = _VOL_CACHE.get("iface") or _init_pycaw()
         if iface is not None:
-            _VOL_CACHE["iface"] = iface
             try:
+                _VOL_CACHE["iface"] = iface
                 iface.SetMasterVolumeLevelScalar(value, None)
                 return
             except Exception:
-                pass  # fall through to media keys
+                iface = _init_pycaw()
+                if iface is not None:
+                    _VOL_CACHE["iface"] = iface
+                    try:
+                        iface.SetMasterVolumeLevelScalar(value, None)
+                        return
+                    except Exception:
+                        pass
     _set_volume_via_keys(value)
 
 
@@ -94,14 +122,15 @@ def _set_volume_scalar(value: float) -> None:
 VK_VOLUME_MUTE = 0xAD
 VK_VOLUME_UP = 0xAF
 VK_VOLUME_DOWN = 0xAE
+KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 
 
 def _press_vk(vk: int) -> None:
     try:
-        ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+        ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, 0)
         time.sleep(0.03)
-        ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+        ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
     except Exception:
         # pyautogui fallback
         try:
@@ -151,17 +180,19 @@ def _toggle_mute_pycaw() -> bool:
 @register("volumeUp")
 def volume_up(args: Dict[str, Any]) -> Dict[str, Any]:
     step = float(args.get("amount", 0.10))
-    new = min(1.0, _current_volume() + step)
+    current = _current_volume()
+    new = min(1.0, current + step)
     _set_volume_scalar(new)
-    return {"result": f"Volume increased to {int(new * 100)}%."}
+    return {"result": f"Volume increased to {int(round(new * 100))}%.", "volume": int(round(new * 100))}
 
 
 @register("volumeDown")
 def volume_down(args: Dict[str, Any]) -> Dict[str, Any]:
     step = float(args.get("amount", 0.10))
-    new = max(0.0, _current_volume() - step)
+    current = _current_volume()
+    new = max(0.0, current - step)
     _set_volume_scalar(new)
-    return {"result": f"Volume decreased to {int(new * 100)}%."}
+    return {"result": f"Volume decreased to {int(round(new * 100))}%.", "volume": int(round(new * 100))}
 
 
 @register("setVolume")
@@ -174,7 +205,7 @@ def set_volume(args: Dict[str, Any]) -> Dict[str, Any]:
         raise ToolError("Parameter 'percent' (0-100) is required.")
     pct = max(0.0, min(100.0, pct))
     _set_volume_scalar(pct / 100.0)
-    return {"result": f"Volume set to {int(pct)}%."}
+    return {"result": f"Volume set to {int(round(pct))}%.", "volume": int(round(pct))}
 
 
 @register("muteToggle")
@@ -273,22 +304,27 @@ def _current_brightness() -> int:
                 return int(round(sum(vals) / len(vals)))
         except Exception:  # noqa: BLE001
             pass
-    # Windows WMI fallback via PowerShell (does not need extra deps).
+    # Windows WMI/CIM fallback via PowerShell (does not need extra deps).
     if platform.system() == "Windows":
         try:
+            cmd = (
+                "try { (Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness).CurrentBrightness } "
+                "catch { (Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness }"
+            )
             out = subprocess.check_output(
                 [
                     "powershell",
                     "-NoProfile",
                     "-Command",
-                    "(Get-WmiObject -Namespace root/WMI "
-                    "-Class WmiMonitorBrightness).WmiCurrentBrightness",
+                    cmd,
                 ],
                 text=True,
                 timeout=8,
             ).strip()
             if out:
-                return int(out.splitlines()[-1].strip())
+                lines = [line.strip() for line in out.splitlines() if line.strip().isdigit()]
+                if lines:
+                    return int(lines[0])
         except Exception:  # noqa: BLE001
             pass
     raise ToolError("Brightness control is not supported on this device.")
@@ -304,20 +340,24 @@ def _set_brightness(pct: float) -> int:
         except Exception:  # noqa: BLE001
             pass
     if platform.system() == "Windows":
-        # WMI setter requires a method call; shell out to PowerShell.
+        # WMI/CIM setter requires a method call; shell out to PowerShell.
         try:
+            cmd = (
+                f"try {{ Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods | "
+                f"Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout = 1; Brightness = {int(pct)}}} }} "
+                f"catch {{ (Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods) | "
+                f"ForEach-Object {{ $_.WmiSetBrightness(1, {int(pct)}) }} }}"
+            )
             subprocess.run(
                 [
                     "powershell",
                     "-NoProfile",
                     "-Command",
-                    (
-                        "$m = Get-WmiObject -Namespace root/WMI "
-                        "-Class WmiMonitorBrightnessMethods; "
-                        f"$m.WmiSetBrightness(1,{int(pct)})"
-                    ),
+                    cmd,
                 ],
                 check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 timeout=8,
             )
             return int(pct)

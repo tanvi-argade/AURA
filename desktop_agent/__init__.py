@@ -8,3 +8,14 @@ hosts tool code; run with:
 """
 
 __version__ = "1.0.0"
+
+import ctypes
+import platform
+
+if platform.system() == "Windows":
+    try:
+        hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x01FF)
+        if hdesk:
+            ctypes.windll.user32.SetThreadDesktop(hdesk)
+    except Exception:
+        pass

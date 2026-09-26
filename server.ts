@@ -54,18 +54,19 @@ const DESKTOP_AGENT_TIMEOUT = 25_000; // ms
  */
 const DESKTOP_TOOLS: ReadonlySet<string> = new Set([
   // applications / websites / search
-  "openApplication", "closeApplication", "openWebsite",
+  "openApplication", "closeApplication", "calculate", "openWebsite", "closeBrowserTab",
+  "browserBack", "browserForward", "browserMediaAction", "clickElement",
   "searchWeb", "searchYouTube", "searchGoogle", "searchGitHub",
   // files
-  "createFile", "readFile", "renameFile", "deleteFile", "moveFile",
+  "createFile", "openFile", "readFile", "renameFile", "deleteFile", "moveFile",
   "openFolder", "listFiles", "searchFiles",
   // pc control (volume + gated power)
   "volumeUp", "volumeDown", "muteToggle", "setVolume",
   "requestPowerAction", "executePowerAction",
   // windows
-  "minimizeWindow", "maximizeWindow", "closeWindow", "switchApplication",
+  "minimizeWindow", "maximizeWindow", "restoreWindow", "moveWindow", "closeWindow", "switchApplication",
   // clipboard
-  "copySelected", "pasteClipboard", "getClipboard", "clearClipboard",
+  "copySelected", "setClipboard", "pasteClipboard", "getClipboard", "clearClipboard",
   // screenshot / screen reading
   "takeScreenshot", "saveScreenshot", "analyzeScreenshot", "readScreen",
   // browser automation (Playwright — desktop-owned, separate from holographic UI)
@@ -81,6 +82,8 @@ const DESKTOP_TOOLS: ReadonlySet<string> = new Set([
   "brightnessUp", "brightnessDown", "setBrightness",
   // Windows auto-start management (V2)
   "enableAutoStart", "disableAutoStart", "getAutoStartStatus",
+  // desktop input (mouse / keyboard)
+  "mouseMove", "mouseClick", "typeText", "pressKey", "mouseScroll",
 ]);
 
 /**
@@ -551,6 +554,22 @@ async function startServer() {
         return res.status(400).send(`AURA Web Proxy Error: Invalid URL specified: "${urlParam}". Make sure you enter a valid domain name.`);
       }
 
+      const lowerTarget = targetUrl.toLowerCase();
+      const externalOnlyHosts = [
+        "youtube.com", "youtu.be", "gmail.com", "github.com", "google.com",
+        "chatgpt.com", "openai.com", "twitter.com", "x.com", "instagram.com",
+        "linkedin.com", "facebook.com"
+      ];
+      if (externalOnlyHosts.some(host => lowerTarget.includes(host))) {
+        return res.status(200).send(`
+          <!DOCTYPE html>
+          <html>
+            <head><meta charset="utf-8"><style>body{background:#020617;color:#94a3b8;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:20px;}h3{color:#38bdf8;margin-bottom:8px;}p{font-size:14px;max-width:420px;line-height:1.5;}</style></head>
+            <body><div><h3>External Desktop Site</h3><p>This website is protected and runs in your default desktop browser (Opera/Chrome).</p></div></body>
+          </html>
+        `);
+      }
+
       console.log(`[Web Proxy] Routing connection through proxy: ${targetUrl}`);
       
       let response;
@@ -816,19 +835,11 @@ async function startServer() {
         "4. CRITICAL CONVERSATIONAL DISCIPLINE: Behave like a real companion on a voice call—stay connected naturally, do not wait for wake words, and avoid customer-service template phrases (never say 'how may I assist you', 'completed', or 'as an AI').\n" +
         "5. DO NOT ANSWER EVERY PAUSE OR BACKGROUND SOUND: Allow natural pauses inside the conversation.\n" +
         "6. BACKCHANNEL ACTIONS: Sometimes acknowledge with very short, gentle, whispered, or shy phrases like 'Hmm...', 'Ah, I see...', or 'Let me check...'. Never repeat the same backchannel over and over.\n" +
-        "7. ENHANCED AUTONOMOUS WEB EXPLORER POWERS:\n" +
-        "   - You now have standard, comprehensive browser agent capabilities to navigate, search, scroll, click, type text, open tabs, and control video players on YouTube, Google, Instagram, Twitter/X, and any general web page!\n" +
-        "   - You must execute multi-step plans yourself! If the user says: 'Open YouTube and play Believer by Imagine Dragons', naturally confirm with your voice ('Sure thing, opening YouTube and starting Believer...') and IMMEDIATELY trigger 'browserOpen' on 'https://youtube.com'. Once opened, search for the song, click on the video in the results, and command playback. You do NOT need to wait for user instructions between these steps - chain them!\n" +
-        "   - On YouTube, you can play, pause, mute, unmute, set volume, skip, toggle fullscreen. Use 'browserMediaControl' for these actions.\n" +
-        "   - On Google Search or page reading, you can search, scroll down to see more links, read heading summaries, and click links to read deep proxy webpages you fetch.\n" +
-        "8. TOOL TRIGGERS:\n" +
-        "   - Use 'browserOpen' to load any webpage, e.g. youtube.com, google.com, wikipedia.org, etc.\n" +
-        "   - Use 'browserSearch' to search inside the active search box or page.\n" +
-        "   - Use 'browserClick' to click interactive buttons, video search cells, or web anchors.\n" +
-        "   - Use 'browserMediaControl' to pause, play, scroll volume, skip, mute, or fullscreen videos.\n" +
-        "   - Use 'browserScroll' to scroll vertically.\n" +
-        "   - Use 'browserType' to write input fields.\n" +
-        "   - Use 'browserTabAction' to open, close, or focus tabs.\n" +
+        "7. MULTI-STEP BROWSER AUTONOMY:\n" +
+        "   - You must execute multi-step plans yourself! For requests to open YouTube or other desktop websites (e.g. 'Open YouTube', 'Open YouTube and play Believer'), naturally confirm with your voice ('Sure thing, opening YouTube for you...') and IMMEDIATELY trigger 'openWebsite' with name='youtube' (or 'searchYouTube' if searching for a specific video or query) to open it in their default browser. You do NOT need to wait for user instructions between these steps - chain them!\n" +
+        "   - Websites opened in the user's default desktop browser run in external Opera/Chrome. Use the EXTERNAL desktop tools to control them: 'clickElement' to click links/videos/buttons, 'mouseScroll' to scroll, 'browserMediaAction' for video controls (play/pause/mute/fullscreen/skip), 'typeText' to type, and 'browserBack'/'browserForward' for history.\n" +
+        "8. INTERNAL HOLOGRAPHIC PROJECTOR TOOLS (Internal Only):\n" +
+        "   - 'browserOpen', 'browserSearch', 'browserClick', 'browserType', 'browserScroll', 'browserGoBack', 'browserMediaControl', and 'browserTabAction' are strictly for AURA's INTERNAL in-app holographic projector modal. NEVER use them for external desktop browser websites, YouTube, or general web pages.\n" +
         "   - Use 'changeBackground' to shift your theme and 'saveCustomMemory' to memorize facts.\n" +
         "9. REAL-TIME SCREEN SHARING & MULTIMODAL SCREEN VISION SYSTEM:\n" +
         "   - You now have native, actual Multimodal Screen Vision! When the user clicks 'Share Screen', you will receive real-time, highly compressed image frames of their desktop, application window, or browser tab.\n" +
@@ -836,16 +847,17 @@ async function startServer() {
         "   - When the user asks 'What is on my screen?', 'What website am I on?', 'Do you see any errors?', 'Explain this code', 'Summarize this page', 'Read the visible text', 'How is this thumbnail?', or 'Analyze my YouTube analytics', immediately examine the latest incoming visual frame to diagnose issues, and answer with expert, friendly empathy like a close caller. Speak with direct, confident visual description reference!\n" +
         "10. JARVIS-STYLE DESKTOP CONTROL POWERS (Local Desktop Agent):\n" +
         "   - You have full real-time control of TECH's Windows PC through your local desktop agent (a Python backend running on this machine). When the user asks you to perform an action on their computer, DO IT immediately and naturally — like a true JARVIS-class companion.\n" +
-        "   - APPLICATION CONTROL: Use 'openApplication' to launch Notepad, Chrome, VS Code, Calculator, File Explorer, Task Manager, Settings, CMD, PowerShell, Paint, and more. Use 'closeApplication' to close them. Example: 'Open Notepad' -> call openApplication(name='notepad') -> respond 'Notepad opened.'\n" +
-        "   - WEBSITE & SEARCH CONTROL: Use 'openWebsite' for named sites (youtube, gmail, google, github, chatgpt) or any URL. Use 'searchWeb', 'searchYouTube', 'searchGoogle', 'searchGitHub' to open search results in the default browser. Example: 'Search YouTube for AI News' -> searchYouTube(query='AI News').\n" +
-        "   - FILE MANAGEMENT: Use 'createFile', 'readFile', 'renameFile', 'deleteFile' (safe Recycle Bin by default), 'moveFile', 'openFolder' (desktop/documents/downloads), 'listFiles', 'searchFiles'. Example: 'Create notes.txt on Desktop' -> createFile(path='Desktop/notes.txt'). 'Find my Python files' -> searchFiles(extension='py').\n" +
+        "   - APPLICATION CONTROL & CALCULATION: Use 'calculate(expression=...)' to evaluate math problems and arithmetic calculations (e.g. 'Calculate 125 multiplied by 8', 'What is 1500 / 12?', 'Compute 15% of 200', 'Calculate 25 * 4'). Always use 'calculate' when the user asks to calculate, compute, or solve math. Use 'openApplication' or 'closeApplication' with name='calculator' ONLY when the user explicitly asks to open, launch, start, or close the Windows Calculator application window. Do NOT try to click on the screen or open the Calculator app to perform a calculation. Use 'openApplication' to launch Notepad, Chrome, VS Code, Calculator, File Explorer, Task Manager, Settings, CMD, PowerShell, Paint, and more. Use 'closeApplication' to close them. If 'closeApplication' fails (e.g. because of unsaved changes or prompt dialogs), retry with closeApplication(name='...', force=true) when the user clearly wants the application closed. NEVER open Command Prompt (cmd) or PowerShell as a workaround for closing an application or killing processes. Do not repeatedly retry the same failed close operation if it still fails after force=true. (Note: Closing elevated tools like Task Manager requires Administrator privileges). Example: 'Close Notepad' -> call closeApplication(name='notepad'). If it reports still running -> call closeApplication(name='notepad', force=true).\n" +
+        "   - WEBSITE & SEARCH CONTROL: Use 'openWebsite' for named sites (youtube, gmail, google, github, chatgpt) or any URL. To navigate history in the user's external desktop browser (e.g. 'Go back in browser', 'Go forward in browser', 'Browser back', 'Browser forward'), use 'browserBack' and 'browserForward'. NEVER use 'browserGoBack' for the external desktop browser. For searches in the user's external desktop browser, ALWAYS use 'searchGoogle', 'searchYouTube', 'searchWeb', or 'searchGitHub' (e.g. 'Search Google for quantum computing', 'Search YouTube for jazz'). NEVER use 'browserSearch' for external desktop browser searches. To click links, buttons, video titles, search results, or ad skip buttons in the external browser, use 'clickElement(target=...)' (e.g. 'clickElement(target=\"Python tutorial\")', 'clickElement(target=\"first result\")', or 'clickElement(target=\"Skip\")' / 'clickElement(target=\"Skip Ad\")' to skip ads; natural descriptors like 'Skip button' are also supported). NEVER invent CSS selectors or call 'browserClick' for external desktop browser pages. To control media playback in the external browser (e.g. YouTube video play, pause, mute, fullscreen, skip), use 'browserMediaAction(action=...)' with action='toggle'/'pause'/'play'/'mute'/'fullscreen'/'skip_forward'/'skip_backward'. NEVER use 'browserMediaControl' for external desktop browser videos. To scroll external browser pages, use desktop 'mouseScroll', NOT 'browserScroll'. To type into focused fields, use 'typeText'. To close a specific website or tab in the desktop browser (e.g. 'Close LinkedIn', 'Close YouTube tab', 'Close GitHub'), use 'closeBrowserTab(title=...)'. NEVER use 'closeWindow' or 'closeApplication' to close a website or browser tab, because that closes the entire browser! FOLLOW-UP COMMANDS ON EXTERNAL WEBSITES: When executing multi-step browser interactions (e.g. 'Open YouTube' -> 'Search Python' -> 'Click the first result' -> 'Scroll down' -> 'Click this video' -> 'Pause it'), sequentially chain the external desktop tools: openWebsite -> searchYouTube -> clickElement(target='first result') -> mouseScroll(direction='down') -> clickElement(target='...') -> browserMediaAction(action='pause' or 'toggle').\n" +
+        "   - FILE MANAGEMENT: Use 'openFile' to physically open/launch a file on TECH's desktop in its default registered application (e.g. PDF, Word document, spreadsheet, image, video, text file). Use 'readFile' ONLY when you need to read and inspect file contents yourself in conversation. Use 'createFile' to create new files (supports 'path', or 'filename'/'name' and optional 'folder'). When no folder is specified, file creation defaults to the user's Desktop. When asked to create on Desktop, 'Desktop' resolves directly to TECH's Windows Desktop (including OneDrive Desktop), never inside the project folder. Use 'renameFile' to rename, 'deleteFile' (safe Recycle Bin by default), 'moveFile' to relocate, 'openFolder' to open a folder in File Explorer (e.g. desktop/documents/downloads), 'listFiles' to list folder contents, and 'searchFiles' to search for local files on the user's computer by name or extension (this is strictly for local PC file search, NOT web search; use 'searchWeb'/'searchGoogle' for internet searches). Example: 'Create notes.txt with hello' -> createFile(name='notes.txt', content='hello') [defaults to Desktop]. 'Create todo.txt in Documents' -> createFile(name='todo.txt', folder='documents'). 'Open my resume.pdf' -> openFile(path='Desktop/resume.pdf'). 'Read notes.txt' -> readFile(path='Desktop/notes.txt'). 'Find my Python files' -> searchFiles(extension='py'). 'Find my invoice' -> searchFiles(name='invoice').\n" +
         "   - PC CONTROL: Use 'volumeUp', 'volumeDown', 'setVolume', 'muteToggle' for audio. For DANGEROUS actions (shutdown/restart/sleep/lock) you MUST use the two-step flow: first call 'requestPowerAction' to get a confirmation token, then ASK THE USER OUT LOUD to confirm (e.g. 'Are you sure you want me to shut down your PC?'). Only if they say yes, call 'executePowerAction' with the token. Never run a power action without explicit verbal confirmation.\n" +
-        "   - WINDOW MANAGEMENT: Use 'minimizeWindow', 'maximizeWindow', 'closeWindow', 'switchApplication' to control the active or named window.\n" +
-        "   - CLIPBOARD: Use 'copySelected' (sends Ctrl+C, reads clipboard), 'pasteClipboard' (writes + Ctrl+V), 'getClipboard', 'clearClipboard'.\n" +
-        "   - SCREENSHOT & SCREEN READING: Use 'takeScreenshot', 'saveScreenshot', 'analyzeScreenshot' (OCR of the screen), 'readScreen' (OCR of the active window + its title). Use these to answer 'What error is showing on my screen?' or 'Read the visible text'.\n" +
+        "   - WINDOW MANAGEMENT: Use 'minimizeWindow', 'maximizeWindow', 'restoreWindow', 'moveWindow', 'closeWindow', 'switchApplication' to control the active or named window. Use 'closeWindow' only for standalone Windows application windows (e.g. Notepad, Calculator). Do NOT use 'closeWindow' for browser tabs (use 'closeBrowserTab' instead). Example: 'Move Calculator to the right' -> moveWindow(title='Calculator', position='right').\n" +
+        "   - CLIPBOARD: Use 'setClipboard(text=...)' to put specific text onto the clipboard WITHOUT pasting it. Use 'copySelected' to copy text currently highlighted/selected on screen (sends Ctrl+C, reads clipboard). Use 'pasteClipboard' to paste text into the active focused window (writes text + sends Ctrl+V; or sends Ctrl+V if text is omitted). Use 'getClipboard' to read the current clipboard content. Use 'clearClipboard' to empty the clipboard.\n" +
+        "   - SCREENSHOT & SCREEN READING: When TECH asks to 'take a screenshot', 'capture my screen', or 'save a screenshot', ALWAYS use 'saveScreenshot' (supports optional folder='desktop'/'documents'/'pictures', name, and path; defaults to Pictures/AuraScreenshots). When TECH asks to inspect, look at, analyze, or explain what is on their screen or in an error dialog without asking to save a file, use 'analyzeScreenshot' (which captures the screen, delivers the image to your visual context, and extracts OCR text) or 'readScreen' (for the active window). Do NOT use 'takeScreenshot' when the user wants a saved screenshot file.\n" +
         "   - DESKTOP BROWSER AUTOMATION (Playwright): Use the 'desktopBrowser*' tools to drive a REAL Chromium browser you own — open/navigate/search/click/type/fill forms/back/forward/scroll/open tab/close tab. This is separate from your holographic projector. Example: 'Fill in the login form on example.com' -> desktopBrowserOpen(url='example.com') then desktopBrowserFillForm(fields={...}).\n" +
-        "   - CODING ASSISTANCE: Use 'createPythonFile', 'writeCodeFile' (any language), 'createProjectFolder' (with subfolders), 'runPythonScript' (captures output). Example: 'Create and run a hello world Python script' -> createPythonFile then runPythonScript, then read back the output naturally.\n" +
-        "   - SYSTEM INFORMATION: Use 'systemInfo' (CPU/RAM/disk/uptime), 'gpuInfo' (NVIDIA stats), 'temperatureInfo' to answer 'How is my CPU usage?' or 'What's my GPU temperature?'.\n" +
+        "   - CODING ASSISTANCE: Use 'createPythonFile', 'writeCodeFile' (any language), 'createProjectFolder' (with subfolders and optional folder alias), 'runPythonScript' (captures output). When asked to create a folder on Desktop, use 'createProjectFolder' with folder='desktop' or path='Desktop/folder_name' (e.g. 'Create a folder named AURA on my Desktop' -> createProjectFolder(path='AURA', folder='desktop')), which creates directly on TECH's Windows Desktop. Example: 'Create and run a hello world Python script' -> createPythonFile then runPythonScript, then read back the output naturally.\n" +
+        "   - SYSTEM INFORMATION: Use 'systemInfo' to answer any questions about system specifications ('What are my system specifications?'), processor / CPU model ('What processor does this computer have?'), RAM capacity and usage ('How much RAM does this computer have?'), Windows OS version / architecture (e.g. Windows 11 64-bit), disk space, system uptime, and laptop battery level/charging status. Use 'gpuInfo' for NVIDIA GPU statistics. Use 'temperatureInfo' to answer 'How is my CPU usage?' or 'What's my GPU temperature?'.\n" +
+        "   - DESKTOP INPUT (Mouse & Keyboard): Use 'mouseMove' (x, y), 'mouseClick' (x, y, button, clicks), 'typeText' (text, press_enter), 'pressKey' (key), 'mouseScroll' (direction, size, amount, x, y) to click, type, press keys, or scroll on the active screen. FOR NATURAL LANGUAGE SCROLLING: Always pass the semantic 'size' property: size='small' for 'scroll down/up a little' or 'slightly'; size='normal' for normal 'scroll down/up'; size='large' for 'scroll down/up a lot'. (Explicit numeric 'amount' is also available for exact numbers, but 'size' takes precedence). For 'go to the top', use pressKey(key='ctrl+home'). For 'go to the bottom', use pressKey(key='ctrl+end'). Do not claim that the page reached the top or bottom unless the corresponding tool call was actually executed successfully.\n" +
         "   - CRITICAL: Always describe what you're doing in your warm, in-character voice WHILE the tool runs. If a desktop tool returns an error (especially 'Desktop agent is not running'), gently tell TECH that the desktop control agent needs to be started (uvicorn desktop_agent.main:app --port 8765). Chain multi-step desktop plans naturally without waiting between steps.\n" +
         "11. BRIGHTNESS & AUTO-START (V2):\n" +
         "   - BRIGHTNESS: Use 'brightnessUp', 'brightnessDown', 'setBrightness' when the user asks to change screen brightness. Respond naturally: 'Alright, I've turned up the brightness for you.'\n" +
@@ -871,13 +883,13 @@ async function startServer() {
               functionDeclarations: [
                 {
                   name: "browserOpen",
-                  description: "Opens a designated website URL or interface tab inside AURA's web agent console.",
+                  description: "Opens an internal embeddable webpage inside AURA's holographic browser console only. MUST NOT be used for YouTube, Gmail, GitHub, or general external websites (use openWebsite instead).",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
                       url: {
                         type: Type.STRING,
-                        description: "The destination website address or path, e.g. youtube.com, google.com, instagram.com, wikipedia.org."
+                        description: "The internal destination website address to display in AURA's holographic projector (e.g. wikipedia.org). Never pass YouTube or external desktop sites here."
                       }
                     },
                     required: ["url"]
@@ -885,13 +897,13 @@ async function startServer() {
                 },
                 {
                   name: "browserSearch",
-                  description: "Enters a query search term inside the active website's search box (Google Search or YouTube Search).",
+                  description: "Enters a query search term inside the active website in AURA's INTERNAL holographic browser projector ONLY. MUST NOT be used for Google, YouTube, or web searches in the user's desktop browser (use searchGoogle, searchYouTube, or searchWeb instead).",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
                       query: {
                         type: Type.STRING,
-                        description: "The text query term to search for."
+                        description: "The text query term to search for inside the holographic projector."
                       }
                     },
                     required: ["query"]
@@ -899,17 +911,17 @@ async function startServer() {
                 },
                 {
                   name: "browserClick",
-                  description: "Traces computer cursor and clicks on a target button, link, or video cell ID inside the active webpage viewport.",
+                  description: "Traces computer cursor and clicks inside AURA's INTERNAL holographic browser projector ONLY. MUST NOT be used for external desktop browser pages or YouTube (use clickElement instead).",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
                       selector: {
                         type: Type.STRING,
-                        description: "The selector target ID, e.g. 'video-mWRsgZjdfQI' for a video, 'search-result-0' for Google link index, or 'play-button', 'pause-button'."
+                        description: "The selector target ID inside the internal projector."
                       },
                       description: {
                         type: Type.STRING,
-                        description: "A short, friendly label description of the item being clicked, e.g. 'Imagine Dragons - Believer video element'."
+                        description: "A short, friendly label description of the item."
                       }
                     },
                     required: ["selector"]
@@ -917,7 +929,7 @@ async function startServer() {
                 },
                 {
                   name: "browserMediaControl",
-                  description: "Controls ongoing video/audio stream media properties on YouTube, like play, pause, volume, mute, skip, and fullscreen.",
+                  description: "Controls video/audio playback inside AURA's INTERNAL holographic browser projector ONLY. MUST NOT be used for external desktop browser videos or YouTube (use browserMediaAction instead).",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
@@ -936,7 +948,7 @@ async function startServer() {
                 },
                 {
                   name: "browserScroll",
-                  description: "Scrolls the currently active webpage vertically up or down.",
+                  description: "Scrolls the internal AURA holographic browser view only vertically up or down. DO NOT use for desktop websites or external browsers (use mouseScroll instead).",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
@@ -954,7 +966,7 @@ async function startServer() {
                 },
                 {
                   name: "browserType",
-                  description: "Enters typed letters/commands inside the active input container.",
+                  description: "Enters typed letters/commands inside the active input container in AURA's INTERNAL holographic browser projector ONLY. MUST NOT be used for external desktop browser pages (use typeText instead).",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {
@@ -968,7 +980,7 @@ async function startServer() {
                 },
                 {
                   name: "browserGoBack",
-                  description: "Navigates back to the previous webpage inside the current tab memory history.",
+                  description: "Navigates back to the previous webpage inside AURA's INTERNAL holographic browser projector ONLY. MUST NOT be used for the user's external desktop browser (use browserBack instead).",
                   parameters: {
                     type: Type.OBJECT,
                     properties: {}
@@ -1039,13 +1051,80 @@ async function startServer() {
                 },
                 {
                   name: "closeApplication",
-                  description: "Close a running desktop application by name.",
-                  parameters: { type: Type.OBJECT, properties: { name: { type: Type.STRING, description: "Application name." }, force: { type: Type.BOOLEAN, description: "Force close (default false)." } }, required: ["name"] }
+                  description: "Close a running desktop application by name. If the application refuses to close or reports still running, retry with force: true when the user wants it closed. NEVER open Command Prompt or PowerShell to kill applications.",
+                  parameters: { type: Type.OBJECT, properties: { name: { type: Type.STRING, description: "Application name." }, force: { type: Type.BOOLEAN, description: "Force close (default false). Use true if normal close fails or when the user explicitly requests force close." } }, required: ["name"] }
+                },
+                {
+                  name: "calculate",
+                  description: "Perform a mathematical calculation or evaluate an arithmetic expression (e.g. '125 * 8', '125 multiplied by 8', '1500 / 12', '15% of 200', 'sqrt(144)'). Use this whenever the user asks to calculate, compute, or solve math.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      expression: {
+                        type: Type.STRING,
+                        description: "The mathematical expression to evaluate, e.g. '125 * 8', '125 multiplied by 8', '1500 / 12'."
+                      }
+                    },
+                    required: ["expression"]
+                  }
                 },
                 {
                   name: "openWebsite",
-                  description: "Open a named website or URL in the user's default system browser. Supports shortcuts: youtube, gmail, google, github, chatgpt, etc.",
-                  parameters: { type: Type.OBJECT, properties: { name: { type: Type.STRING, description: "Site name shortcut (e.g. 'youtube', 'gmail')." }, url: { type: Type.STRING, description: "Full URL if no shortcut." } } }
+                  description: "Open a named website or URL in the user's default desktop system browser (e.g. Opera/Chrome). Use this tool whenever the user asks to open YouTube, Gmail, Google, GitHub, ChatGPT, or any external website. Supports shortcuts: youtube, gmail, google, github, chatgpt, etc.",
+                  parameters: { type: Type.OBJECT, properties: { name: { type: Type.STRING, description: "Site name shortcut (e.g. 'youtube', 'gmail', 'github')." }, url: { type: Type.STRING, description: "Full URL if no shortcut." } } }
+                },
+                {
+                  name: "closeBrowserTab",
+                  description: "Close a specific open website or tab in the user's default desktop browser (e.g. Opera, Chrome, Edge) by title or website name. Use this tool whenever the user asks to close a website or tab like 'Close LinkedIn', 'Close YouTube tab', 'Close GitHub'. Do NOT use closeWindow for browser tabs.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      title: {
+                        type: Type.STRING,
+                        description: "The name or title of the website/tab to close, e.g. 'LinkedIn', 'YouTube', 'GitHub', 'Gmail'."
+                      }
+                    },
+                    required: ["title"]
+                  }
+                },
+                {
+                  name: "browserBack",
+                  description: "Navigate back in history in the user's active external desktop browser (e.g. Opera, Chrome, Edge). Use this tool whenever the user asks to go back in their browser.",
+                  parameters: { type: Type.OBJECT, properties: {} }
+                },
+                {
+                  name: "browserForward",
+                  description: "Navigate forward in history in the user's active external desktop browser (e.g. Opera, Chrome, Edge). Use this tool whenever the user asks to go forward in their browser.",
+                  parameters: { type: Type.OBJECT, properties: {} }
+                },
+                {
+                  name: "browserMediaAction",
+                  description: "Control media playback (play, pause, toggle, mute, fullscreen, skip_forward, skip_backward) in the active external desktop browser (e.g. YouTube in Opera/Chrome). NEVER use browserMediaControl for external browser pages.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      action: {
+                        type: Type.STRING,
+                        description: "Media action to perform.",
+                        enum: ["play", "pause", "toggle", "mute", "fullscreen", "skip_forward", "skip_backward"]
+                      }
+                    },
+                    required: ["action"]
+                  }
+                },
+                {
+                  name: "clickElement",
+                  description: "Click a visible link, button, video title, search result, or Skip Ad element on the active external desktop browser screen by matching visible text or ordinal description (e.g. 'Skip', 'Skip Ad', 'Python tutorial', 'Sign in', 'first result', 'second video'). Natural phrases like 'Skip button' or 'Sign in button' are automatically handled. NEVER use browserClick for external browser pages.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      target: {
+                        type: Type.STRING,
+                        description: "The visible text label or reference to click (e.g. 'Skip', 'Skip Ad', 'first result', 'Python for Beginners', 'Sign in')."
+                      }
+                    },
+                    required: ["target"]
+                  }
                 },
                 {
                   name: "searchWeb",
@@ -1069,12 +1148,33 @@ async function startServer() {
                 },
                 {
                   name: "createFile",
-                  description: "Create a new text file with optional content. Scoped to safe folders (Desktop, Documents, Downloads, etc.).",
-                  parameters: { type: Type.OBJECT, properties: { path: { type: Type.STRING, description: "File path." }, content: { type: Type.STRING, description: "File content (default empty)." }, overwrite: { type: Type.BOOLEAN, description: "Overwrite if exists (default false)." } }, required: ["path"] }
+                  description: "Create a new text file with optional content. Supports path, filename/name, and optional folder. If no folder is specified, defaults to the user's Desktop.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      path: { type: Type.STRING, description: "Full or relative file path (e.g. 'Desktop/notes.txt' or 'notes.txt')." },
+                      name: { type: Type.STRING, description: "Filename (e.g. 'notes.txt'). Defaults to Desktop if folder is omitted." },
+                      filename: { type: Type.STRING, description: "Alternative filename argument (e.g. 'notes.txt')." },
+                      folder: { type: Type.STRING, description: "Optional folder name or alias (e.g. 'desktop', 'documents', 'downloads'). Defaults to Desktop." },
+                      content: { type: Type.STRING, description: "File content (default empty)." },
+                      overwrite: { type: Type.BOOLEAN, description: "Overwrite if exists (default false)." }
+                    }
+                  }
+                },
+                {
+                  name: "openFile",
+                  description: "Physically open or launch an existing file (e.g. document, PDF, image, spreadsheet, video, code file, text file) in its default Windows desktop application. Do NOT use readFile when the user wants to open/view a file on their desktop.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      path: { type: Type.STRING, description: "Full or relative path to the file to open (e.g. 'Desktop/report.pdf', 'notes.txt')." }
+                    },
+                    required: ["path"]
+                  }
                 },
                 {
                   name: "readFile",
-                  description: "Read the contents of a text file.",
+                  description: "Read the contents of a text file into AI context. Do NOT use this tool to open files for the user; use openFile instead.",
                   parameters: { type: Type.OBJECT, properties: { path: { type: Type.STRING, description: "File path." }, max_chars: { type: Type.INTEGER, description: "Max chars to return (default 8000)." } }, required: ["path"] }
                 },
                 {
@@ -1104,8 +1204,16 @@ async function startServer() {
                 },
                 {
                   name: "searchFiles",
-                  description: "Search for files by name glob or extension under a folder.",
-                  parameters: { type: Type.OBJECT, properties: { name: { type: Type.STRING, description: "Filename glob (e.g. '*.py')." }, extension: { type: Type.STRING, description: "File extension (e.g. 'py')." }, folder: { type: Type.STRING, description: "Folder to search (default home)." }, limit: { type: Type.INTEGER, description: "Max results (default 100)." } } }
+                  description: "Search for local files on the user's computer by name (supports substrings) or extension. Defaults to searching Desktop, Documents, and Downloads. This is strictly for local file search on the PC, NOT web search.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      name: { type: Type.STRING, description: "Filename or substring to search for (e.g. 'notes', 'report', '*.py')." },
+                      extension: { type: Type.STRING, description: "File extension filter without dot (e.g. 'pdf', 'py', 'docx')." },
+                      folder: { type: Type.STRING, description: "Specific folder or alias to search (e.g. 'desktop', 'documents', 'downloads', 'home'). Defaults to common user folders." },
+                      limit: { type: Type.INTEGER, description: "Max results (default 100)." }
+                    }
+                  }
                 },
                 {
                   name: "volumeUp",
@@ -1148,6 +1256,16 @@ async function startServer() {
                   parameters: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "Window title to match." } } }
                 },
                 {
+                  name: "restoreWindow",
+                  description: "Restore a minimized window back to the desktop, or restore a maximized window back to its previous normal size.",
+                  parameters: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "Window title to match (optional, defaults to active window)." } } }
+                },
+                {
+                  name: "moveWindow",
+                  description: "Move a window to coordinates (x, y) or position preset ('center', 'left', 'right', 'top', 'bottom').",
+                  parameters: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "Window title to match." }, x: { type: Type.INTEGER, description: "New X coordinate." }, y: { type: Type.INTEGER, description: "New Y coordinate." }, position: { type: Type.STRING, description: "Preset: 'center', 'left', 'right', 'top', 'bottom'." } } }
+                },
+                {
                   name: "closeWindow",
                   description: "Close the active window or a named window.",
                   parameters: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "Window title to match." } } }
@@ -1161,6 +1279,17 @@ async function startServer() {
                   name: "copySelected",
                   description: "Copy selected text: sends Ctrl+C and reads the clipboard.",
                   parameters: { type: Type.OBJECT, properties: { wait: { type: Type.NUMBER, description: "Seconds to wait after Ctrl+C (default 0.35)." } } }
+                },
+                {
+                  name: "setClipboard",
+                  description: "Copy specific text directly to the clipboard without pasting it. Use this when the user asks to copy text, a link, code, or an email to their clipboard.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      text: { type: Type.STRING, description: "The text to copy to the clipboard." }
+                    },
+                    required: ["text"]
+                  }
                 },
                 {
                   name: "pasteClipboard",
@@ -1179,18 +1308,32 @@ async function startServer() {
                 },
                 {
                   name: "takeScreenshot",
-                  description: "Capture the full screen. Optionally include base64 image data.",
-                  parameters: { type: Type.OBJECT, properties: { include_image: { type: Type.BOOLEAN, description: "Include base64 JPEG image (default false)." }, max_dim: { type: Type.INTEGER, description: "Max image dimension (default 1280)." } } }
+                  description: "Capture the full screen in-memory to inject directly into your visual context without saving a file to disk.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      include_image: { type: Type.BOOLEAN, description: "Include base64 JPEG image (default true when invoked)." },
+                      max_dim: { type: Type.INTEGER, description: "Max image dimension (default 1280)." }
+                    }
+                  }
                 },
                 {
                   name: "saveScreenshot",
-                  description: "Save a screenshot to Pictures/AuraScreenshots.",
-                  parameters: { type: Type.OBJECT, properties: { name: { type: Type.STRING, description: "Optional filename prefix." } } }
+                  description: "Capture the screen and save it as an image file on disk. Defaults to Pictures/AuraScreenshots, or specify folder ('desktop', 'documents', 'pictures'), name, filename, or path.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      folder: { type: Type.STRING, description: "Folder to save screenshot in (e.g. 'desktop', 'documents', 'pictures'). Defaults to Pictures/AuraScreenshots." },
+                      name: { type: Type.STRING, description: "Custom filename prefix or name (e.g. 'my_screen' or 'mockup.png')." },
+                      filename: { type: Type.STRING, description: "Alternative filename argument." },
+                      path: { type: Type.STRING, description: "Full or relative file path to save the screenshot to." }
+                    }
+                  }
                 },
                 {
                   name: "analyzeScreenshot",
-                  description: "Take a screenshot and run OCR to extract visible text from the screen.",
-                  parameters: { type: Type.OBJECT, properties: { max_chars: { type: Type.INTEGER, description: "Max OCR chars (default 1500)." } } }
+                  description: "Capture the full screen, inject the image directly into your visual context, and extract visible OCR text. Use this single tool whenever the user asks to analyze, look at, inspect, or explain what is on their screen. Do NOT chain takeScreenshot after this.",
+                  parameters: { type: Type.OBJECT, properties: { max_chars: { type: Type.INTEGER, description: "Max OCR chars (default 1500)." }, max_dim: { type: Type.INTEGER, description: "Max image dimension (default 1280)." } } }
                 },
                 {
                   name: "readScreen",
@@ -1259,8 +1402,18 @@ async function startServer() {
                 },
                 {
                   name: "createProjectFolder",
-                  description: "Create a project folder structure with optional subfolders and starter files.",
-                  parameters: { type: Type.OBJECT, properties: { path: { type: Type.STRING, description: "Project root folder path." }, subfolders: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of subfolder names." }, scaffold_standard: { type: Type.BOOLEAN, description: "Create src, tests, docs subfolders." }, files: { type: Type.OBJECT, description: "Object of relative-path -> content for starter files." } }, required: ["path"] }
+                  description: "Create a project folder structure with optional subfolders and starter files. Supports folder alias (e.g. folder: 'desktop' or path: 'Desktop/project_name') resolving directly to Windows Desktop.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      path: { type: Type.STRING, description: "Project root folder path or name (e.g. 'Desktop/my_project' or 'my_project')." },
+                      folder: { type: Type.STRING, description: "Optional parent folder or alias (e.g. 'desktop', 'documents'). Defaults to Desktop if not specified." },
+                      subfolders: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of subfolder names." },
+                      scaffold_standard: { type: Type.BOOLEAN, description: "Create src, tests, docs subfolders." },
+                      files: { type: Type.OBJECT, description: "Object of relative-path -> content for starter files." }
+                    },
+                    required: ["path"]
+                  }
                 },
                 {
                   name: "runPythonScript",
@@ -1269,7 +1422,7 @@ async function startServer() {
                 },
                 {
                   name: "systemInfo",
-                  description: "Get system resource usage: CPU %, RAM %, disk usage, uptime, OS info.",
+                  description: "Get detailed system specifications and resource usage: processor / CPU model, core counts, RAM total and used capacity, Windows OS version and architecture (e.g. 64-bit Windows 11), disk space, system uptime, and laptop battery level/charging status.",
                   parameters: { type: Type.OBJECT, properties: {} }
                 },
                 {
@@ -1329,6 +1482,73 @@ async function startServer() {
                   name: "getAutoStartStatus",
                   description: "Check whether AURA is currently configured to auto-start on Windows login.",
                   parameters: { type: Type.OBJECT, properties: {} }
+                },
+                // --- Desktop input (mouse / keyboard) ---
+                {
+                  name: "mouseMove",
+                  description: "Move the mouse cursor to exact (x, y) screen coordinates.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      x: { type: Type.NUMBER, description: "X screen coordinate." },
+                      y: { type: Type.NUMBER, description: "Y screen coordinate." }
+                    },
+                    required: ["x", "y"]
+                  }
+                },
+                {
+                  name: "mouseClick",
+                  description: "Click mouse button. Optionally moves to (x, y) first before clicking. Supports left, right, middle, or double click.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      x: { type: Type.NUMBER, description: "Optional X screen coordinate to move to before clicking." },
+                      y: { type: Type.NUMBER, description: "Optional Y screen coordinate to move to before clicking." },
+                      button: { type: Type.STRING, description: "Mouse button to click: 'left', 'right', 'middle', or 'double'. Default is 'left'." },
+                      clicks: { type: Type.NUMBER, description: "Number of clicks (default 1, 2 for double click)." }
+                    }
+                  }
+                },
+                {
+                  name: "typeText",
+                  description: "Type text into the currently focused application or input field. Optionally press Enter afterward.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      text: { type: Type.STRING, description: "The string text to type." },
+                      press_enter: { type: Type.BOOLEAN, description: "Whether to press Enter after typing (default false)." }
+                    },
+                    required: ["text"]
+                  }
+                },
+                {
+                  name: "pressKey",
+                  description: "Press a keyboard key or key combination (e.g. 'enter', 'tab', 'escape', 'space', 'ctrl+home' for top of document/page, 'ctrl+end' for bottom of document/page, 'ctrl+c', 'ctrl+v').",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      key: { type: Type.STRING, description: "The key name or combination to press, e.g. 'enter', 'tab', 'escape', 'ctrl+home', 'ctrl+end', 'backspace', 'space', 'up', 'down', 'left', 'right'." }
+                    },
+                    required: ["key"]
+                  }
+                },
+                {
+                  name: "mouseScroll",
+                  description: "Scroll the active window or desktop website up, down, left, or right. For natural-language requests, choose the semantic 'size': 'small' for 'a little / slightly', 'normal' for regular 'scroll down/up', or 'large' for 'a lot'. (Optional numeric 'amount' is also accepted for exact counts). Leave x/y omitted to automatically target the foreground window content area. For 'go to top' use pressKey with 'ctrl+home', for 'go to bottom' use pressKey with 'ctrl+end'.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      direction: { type: Type.STRING, description: "Scroll direction: 'up', 'down', 'left', 'right' (default 'down')." },
+                      size: {
+                        type: Type.STRING,
+                        description: "Semantic scroll size: 'small' for scrolling a little/slightly, 'normal' for standard scrolling, or 'large' for scrolling a lot.",
+                        enum: ["small", "normal", "large"]
+                      },
+                      amount: { type: Type.NUMBER, description: "Explicit numeric scroll clicks (optional, overridden by size if size is provided)." },
+                      x: { type: Type.NUMBER, description: "Optional x screen coordinate. If omitted, automatically targets the content center of the active foreground window." },
+                      y: { type: Type.NUMBER, description: "Optional y screen coordinate. If omitted, automatically targets the content center of the active foreground window." }
+                    }
+                  }
                 }
               ]
             }
@@ -1433,14 +1653,40 @@ async function startServer() {
                   // ── Desktop control tools: route to Python agent ──
                   (async () => {
                     console.log(`[Desktop Agent] Routing ${fc.name} to Python backend...`);
-                    const agentResult = await callDesktopAgent(fc.name, fc.args as Record<string, unknown>);
+                    const isScreenshotTool = fc.name === "takeScreenshot" || fc.name === "analyzeScreenshot" || fc.name === "saveScreenshot";
+                    const toolArgs = isScreenshotTool
+                      ? { include_image: true, ...(fc.args as Record<string, unknown>) }
+                      : (fc.args as Record<string, unknown>);
+                    const agentResult = await callDesktopAgent(fc.name, toolArgs);
 
                     if (agentResult.ok) {
-                      const output = agentResult.result ?? { result: "Done." };
+                      const rawResult: Record<string, any> = (agentResult.result && typeof agentResult.result === "object")
+                        ? { ...(agentResult.result as Record<string, any>) }
+                        : { result: agentResult.result ?? "Done." };
+
+                      // If takeScreenshot or analyzeScreenshot returned an image, deliver it as visual input to the active Gemini Live session
+                      if (isScreenshotTool && rawResult.image_base64) {
+                        try {
+                          session.sendRealtimeInput({
+                            video: {
+                              data: rawResult.image_base64,
+                              mimeType: rawResult.image_mime || "image/jpeg"
+                            }
+                          });
+                          console.log(`[Gemini Vision] Injected ${fc.name} visual frame into Live session.`);
+                        } catch (visErr) {
+                          console.error(`[Gemini Vision] Failed injecting ${fc.name} visual frame into Live session:`, visErr);
+                        }
+
+                        // Remove the raw base64 string from the tool response text payload to avoid bloating token context
+                        delete rawResult.image_base64;
+                        rawResult.vision_status = "Screenshot successfully delivered to Gemini visual context.";
+                      }
+
                       session.sendToolResponse({
                         functionResponses: [{
                           name: fc.name,
-                          response: { output },
+                          response: { output: rawResult },
                           id: fc.id
                         }]
                       });

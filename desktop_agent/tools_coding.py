@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .registry import ToolError, register
-from .tools_files import _ensure_safe
+from .tools_files import _ensure_safe, _resolve_file, _resolve_folder
 
 
 # Extension map for writeCodeFile.
@@ -87,7 +87,7 @@ def create_python_file(args: Dict[str, Any]) -> Dict[str, Any]:
     content = args.get("content", "")
     if not path:
         raise ToolError("Parameter 'path' is required.")
-    p = Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
+    p = _resolve_file(str(path).strip())
     if p.suffix.lower() != ".py":
         p = p.with_suffix(".py")
     _ensure_safe(p)
@@ -105,7 +105,7 @@ def write_code_file(args: Dict[str, Any]) -> Dict[str, Any]:
     language = (args.get("language") or "txt").strip().lower()
     if not path:
         raise ToolError("Parameter 'path' is required.")
-    p = Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
+    p = _resolve_file(str(path).strip())
     # If the caller gave a basename without extension, append the language's.
     ext = LANG_EXT.get(language)
     if ext and p.suffix == "":
@@ -123,7 +123,16 @@ def create_project_folder(args: Dict[str, Any]) -> Dict[str, Any]:
     path = args.get("path") or args.get("name")
     if not path:
         raise ToolError("Parameter 'path' (project root) is required.")
-    root = Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
+    folder = args.get("folder") or args.get("directory")
+    raw_path_str = str(path).strip()
+    if folder:
+        base = _resolve_folder(str(folder))
+        norm = raw_path_str.replace("\\", "/").lower()
+        if norm.startswith("desktop/") and base == _resolve_folder("desktop"):
+            raw_path_str = raw_path_str[len("desktop/"):]
+        root = (base / raw_path_str).resolve()
+    else:
+        root = _resolve_folder(raw_path_str)
     _ensure_safe(root)
     root.mkdir(parents=True, exist_ok=True)
 

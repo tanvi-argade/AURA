@@ -392,23 +392,19 @@ export default function App() {
           "browserScroll",
           "browserType",
           "browserGoBack",
-          "browserTabAction",
-          "openWebsite"
+          "browserTabAction"
         ];
 
         if (browserTools.includes(name)) {
           // Bring up the Holographic Browser Controller if it is not active
           if (!activeProjectorUrl) {
-            let startingUrl = "https://youtube.com";
-            if ((name === "browserOpen" || name === "openWebsite") && args.url) {
-              startingUrl = args.url;
-            }
+            let startingUrl = (name === "browserOpen" && args.url) ? args.url : "about:blank";
             setActiveProjectorUrl(startingUrl);
           }
 
           // Map instructions directly onto Browser Agent
           setBrowserTrigger({
-            type: name === "openWebsite" ? "browserOpen" : name,
+            type: name,
             args,
             id: Math.random().toString(),
             callback: (res) => {

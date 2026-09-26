@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from .registry import register
+from .registry import ToolError, register
 from .tools_websites import _build_search_url, open_url
 
 

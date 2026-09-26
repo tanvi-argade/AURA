@@ -77,13 +77,20 @@ DESKTOP_TOOL_NAMES = [
     # applications / websites / search
     "openApplication",
     "closeApplication",
+    "calculate",
     "openWebsite",
+    "closeBrowserTab",
+    "browserBack",
+    "browserForward",
+    "browserMediaAction",
+    "clickElement",
     "searchWeb",
     "searchYouTube",
     "searchGoogle",
     "searchGitHub",
     # files
     "createFile",
+    "openFile",
     "readFile",
     "renameFile",
     "deleteFile",
@@ -101,10 +108,13 @@ DESKTOP_TOOL_NAMES = [
     # windows
     "minimizeWindow",
     "maximizeWindow",
+    "restoreWindow",
+    "moveWindow",
     "closeWindow",
     "switchApplication",
     # clipboard
     "copySelected",
+    "setClipboard",
     "pasteClipboard",
     "getClipboard",
     "clearClipboard",
@@ -142,6 +152,12 @@ DESKTOP_TOOL_NAMES = [
     "enableAutoStart",
     "disableAutoStart",
     "getAutoStartStatus",
+    # desktop input (mouse / keyboard)
+    "mouseMove",
+    "mouseClick",
+    "typeText",
+    "pressKey",
+    "mouseScroll",
 ]
 
 
@@ -163,6 +179,7 @@ _MODULE_NAMES = [
     "tools_coding",
     "tools_system",
     "tools_startup",
+    "tools_input",
 ]
 
 

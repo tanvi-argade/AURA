@@ -143,6 +143,33 @@ export const BrowserAgent: React.FC<BrowserAgentProps> = ({
     }
   };
 
+  const lastOpenedExternalRef = useRef<{ url: string; time: number }>({ url: "", time: 0 });
+
+  const normalizeForComparison = (u: string) => {
+    try {
+      const parsed = new URL(u);
+      return (parsed.origin + parsed.pathname.replace(/\/+$/, "") + parsed.search).toLowerCase();
+    } catch {
+      return u.trim().toLowerCase().replace(/\/+$/, "");
+    }
+  };
+
+  const openExternalRestrictedUrl = (urlToOpen: string) => {
+    const now = Date.now();
+    const normalized = normalizeForComparison(urlToOpen);
+    // Prevent duplicate window.open() for the same restricted URL within a 4-second window
+    // (e.g. when both initial URL handling and the action trigger occur)
+    if (lastOpenedExternalRef.current.url === normalized && (now - lastOpenedExternalRef.current.time) < 4000) {
+      return;
+    }
+    lastOpenedExternalRef.current = { url: normalized, time: now };
+    try {
+      window.open(urlToOpen, "_blank", "noopener,noreferrer");
+    } catch (err: any) {
+      setNetworkErrors(prev => [...prev, "System pop-up blocker intercepted redirection search."]);
+    }
+  };
+
   // Safe tab initialization
   useEffect(() => {
     if (initialUrl) {
@@ -170,7 +197,7 @@ export const BrowserAgent: React.FC<BrowserAgentProps> = ({
           setDiagnosticStatus("restricted");
           setDiagnosticReason(restrictions.reason);
           // Automatically trigger redirect in new tab
-          window.open(startUrl, "_blank", "noopener,noreferrer");
+          openExternalRestrictedUrl(startUrl);
         } else {
           setDiagnosticStatus("analyzing");
         }
@@ -509,11 +536,7 @@ export const BrowserAgent: React.FC<BrowserAgentProps> = ({
     if (restrictions.restricted) {
       setDiagnosticStatus("restricted");
       setDiagnosticReason(restrictions.reason);
-      try {
-        window.open(finalUrl, "_blank", "noopener,noreferrer");
-      } catch (err: any) {
-        setNetworkErrors(prev => [...prev, "System pop-up blocker intercepted redirection search."]);
-      }
+      openExternalRestrictedUrl(finalUrl);
     }
   };
 
@@ -601,7 +624,12 @@ export const BrowserAgent: React.FC<BrowserAgentProps> = ({
       return `https://www.youtube.com/embed/${ytIdMatcher[1]}?autoplay=1&enablejsapi=1`;
     }
 
-    if (urlStr.includes("youtube.com/results")) {
+    if (urlStr.includes("youtube.com") || urlStr.includes("youtu.be")) {
+      return "about:blank";
+    }
+
+    const restrictions = checkIsRestricted(urlStr);
+    if (restrictions.restricted) {
       return "about:blank";
     }
 

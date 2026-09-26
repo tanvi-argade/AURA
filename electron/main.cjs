@@ -16,7 +16,7 @@
 
 'use strict';
 
-const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, dialog, session, desktopCapturer } = require('electron');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
@@ -228,10 +228,41 @@ function createMainWindow() {
 }
 
 // ---------------------------------------------------------------------------
+// Screen sharing / display media handler
+// ---------------------------------------------------------------------------
+function setupScreenCapture() {
+  if (!session.defaultSession) return;
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'display-capture' || permission === 'media') {
+      return callback(true);
+    }
+    callback(false);
+  });
+
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    desktopCapturer
+      .getSources({ types: ['screen'] })
+      .then((sources) => {
+        if (sources.length > 0) {
+          callback({ video: sources[0] });
+        } else {
+          callback({});
+        }
+      })
+      .catch((err) => {
+        console.error('[Electron] desktopCapturer getSources failed:', err);
+        callback({});
+      });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Bootstrap sequence
 // ---------------------------------------------------------------------------
 async function bootstrap() {
   app.setAppUserModelId('com.aura.desktop');
+  setupScreenCapture();
   createSplashWindow();
 
   try {

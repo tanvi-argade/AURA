@@ -14,15 +14,49 @@ crashing; non-OCR capture still works.
 from __future__ import annotations
 
 import base64
+import ctypes
 import io
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .registry import ToolError, register
+from .tools_files import PICTURES_DIR, _ensure_safe, _resolve_file, _resolve_folder
 
-SCREENSHOTS_DIR = Path(os.path.expanduser("~")) / "Pictures" / "AuraScreenshots"
+SCREENSHOTS_DIR = PICTURES_DIR / "AuraScreenshots"
+
+
+def _enable_dpi_awareness() -> None:
+    """Ensure process DPI awareness is active so window/screen coords match physical pixels."""
+    if sys.platform != "win32":
+        return
+    try:
+        # Per-monitor DPI awareness v2 (Windows 10 1703+)
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+_enable_dpi_awareness()
+
+
+def _ensure_desktop_access() -> None:
+    """Ensure the calling thread is attached to the active interactive input desktop."""
+    if sys.platform != "win32":
+        return
+    try:
+        user32 = ctypes.windll.user32
+        hdesk = user32.OpenInputDesktop(0, False, 0x01FF)
+        if hdesk:
+            user32.SetThreadDesktop(hdesk)
+            user32.CloseDesktop(hdesk)
+    except Exception:
+        pass
 
 
 def _capture() -> "Any":
@@ -30,7 +64,8 @@ def _capture() -> "Any":
     try:
         from PIL import ImageGrab
 
-        img = ImageGrab.grab(all_screens=True)
+        _ensure_desktop_access()
+        img = ImageGrab.grab(all_screens=True, include_layered_windows=True)
         return img
     except Exception as e:  # noqa: BLE001
         raise ToolError(f"Screen capture failed: {e}")
@@ -40,7 +75,8 @@ def _capture_region(bbox):
     try:
         from PIL import ImageGrab
 
-        return ImageGrab.grab(bbox=bbox, all_screens=False)
+        _ensure_desktop_access()
+        return ImageGrab.grab(bbox=bbox, all_screens=False, include_layered_windows=True)
     except Exception as e:  # noqa: BLE001
         raise ToolError(f"Region capture failed: {e}")
 
@@ -149,13 +185,60 @@ def take_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
 @register("saveScreenshot")
 def save_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
     img = _capture()
-    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
+
+    raw_path = args.get("path") or args.get("filename")
+    folder = args.get("folder")
     name = args.get("name")
-    fname = f"{name}-{stamp}.png" if name else f"screenshot-{stamp}.png"
-    out_path = SCREENSHOTS_DIR / fname
+
+    if raw_path:
+        raw_str = str(raw_path).strip()
+        if folder:
+            base_folder = _resolve_folder(str(folder))
+            out_path = (base_folder / raw_str).resolve()
+        else:
+            if "/" not in raw_str and "\\" not in raw_str:
+                SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+                out_path = (SCREENSHOTS_DIR / raw_str).resolve()
+            else:
+                out_path = _resolve_file(raw_str)
+    elif folder:
+        base_folder = _resolve_folder(str(folder))
+        base_folder.mkdir(parents=True, exist_ok=True)
+        fname = f"{name}-{stamp}.png" if name else f"screenshot-{stamp}.png"
+        out_path = (base_folder / fname).resolve()
+    else:
+        SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        fname = f"{name}-{stamp}.png" if name else f"screenshot-{stamp}.png"
+        out_path = (SCREENSHOTS_DIR / fname).resolve()
+
+    if out_path.suffix.lower() not in (".png", ".jpg", ".jpeg"):
+        out_path = out_path.with_suffix(".png")
+
+    _ensure_safe(out_path, allow_anywhere=bool(args.get("allow_anywhere", False)))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, format="PNG")
-    return {"result": f"Saved screenshot to {out_path}.", "path": str(out_path)}
+
+    result: Dict[str, Any] = {
+        "result": f"Saved screenshot to {out_path}.",
+        "path": str(out_path),
+        "width": img.width,
+        "height": img.height,
+    }
+
+    if bool(args.get("include_image", False)):
+        max_dim = int(args.get("max_dim", 1280))
+        if max(img.size) > max_dim:
+            ratio = max_dim / max(img.size)
+            img_small = img.resize(
+                (max(1, int(img.width * ratio)), max(1, int(img.height * ratio)))
+            )
+        else:
+            img_small = img
+        result["image_base64"] = _image_to_b64(img_small, fmt="JPEG", quality=60)
+        result["image_mime"] = "image/jpeg"
+
+    return result
 
 
 @register("analyzeScreenshot")
@@ -164,10 +247,25 @@ def analyze_screenshot(args: Dict[str, Any]) -> Dict[str, Any]:
     try:
         text = _run_ocr(img)
     except ToolError as e:
-        return {"result": f"Screenshot captured, but OCR unavailable: {e.message}"}
+        text = f"OCR unavailable: {e.message}"
+
+    # Downscale + JPEG to keep payload lightweight for Gemini Live visual context
+    max_dim = int(args.get("max_dim", 1280))
+    if max(img.size) > max_dim:
+        ratio = max_dim / max(img.size)
+        img_small = img.resize(
+            (max(1, int(img.width * ratio)), max(1, int(img.height * ratio)))
+        )
+    else:
+        img_small = img
+
     return {
-        "result": "Screenshot analyzed via OCR.",
+        "result": "Screenshot captured and analyzed.",
         "text": _trim_ocr(text, int(args.get("max_chars", 1500))),
+        "width": img.width,
+        "height": img.height,
+        "image_base64": _image_to_b64(img_small, fmt="JPEG", quality=60),
+        "image_mime": "image/jpeg",
     }
 
 

@@ -96,6 +96,16 @@ def copy_selected(args: Dict[str, Any]) -> Dict[str, Any]:
     return {"result": f"Copied {len(text)} characters.", "text": preview, "full_length": len(text)}
 
 
+@register("setClipboard")
+def set_clipboard(args: Dict[str, Any]) -> Dict[str, Any]:
+    text = args.get("text")
+    if text is None:
+        raise ToolError("Parameter 'text' is required.")
+    _write_clipboard(str(text))
+    preview = str(text) if len(str(text)) <= 200 else str(text)[:200] + "…"
+    return {"result": f"Copied {len(str(text))} characters to clipboard.", "text": preview, "length": len(str(text))}
+
+
 @register("pasteClipboard")
 def paste_clipboard(args: Dict[str, Any]) -> Dict[str, Any]:
     text = args.get("text")
@@ -113,6 +123,8 @@ def paste_clipboard(args: Dict[str, Any]) -> Dict[str, Any]:
 @register("getClipboard")
 def get_clipboard(args: Dict[str, Any]) -> Dict[str, Any]:
     text = _read_clipboard()
+    if not text:
+        return {"result": "Clipboard is currently empty.", "text": "", "length": 0}
     max_chars = int(args.get("max_chars", 1000))
     if len(text) > max_chars:
         text = text[:max_chars] + "…"
@@ -125,4 +137,4 @@ def clear_clipboard(args: Dict[str, Any]) -> Dict[str, Any]:
     return {"result": "Clipboard cleared."}
 
 
-__all__ = ["copy_selected", "paste_clipboard", "get_clipboard", "clear_clipboard"]
+__all__ = ["copy_selected", "set_clipboard", "paste_clipboard", "get_clipboard", "clear_clipboard"]
